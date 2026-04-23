@@ -118,16 +118,15 @@ export default function App() {
   const [treeData, setTreeData] = useState([]);
   const [soilData, setSoilData] = useState([]);
   const [communityPosts, setCommunityPosts] = useState([]);
-  const [visitStats, setVisitStats] = useState({ today: "-", total: "-" });
+  const [communityStatus, setCommunityStatus] = useState("저장된 의견을 불러오는 중입니다.");
+  const [visitStats, setVisitStats] = useState({ today: "불러오는 중", total: "불러오는 중" });
 
   useEffect(() => {
     try {
       const savedTree = localStorage.getItem("field_sheet_tree_data");
       const savedSoil = localStorage.getItem("field_sheet_soil_data");
-      const savedPosts = localStorage.getItem("field_sheet_community_posts");
       if (savedTree) setTreeData(JSON.parse(savedTree));
       if (savedSoil) setSoilData(JSON.parse(savedSoil));
-      if (savedPosts) setCommunityPosts(JSON.parse(savedPosts));
     } catch (error) {
       console.error(error);
     }
@@ -142,8 +141,21 @@ export default function App() {
   }, [soilData]);
 
   useEffect(() => {
-    localStorage.setItem("field_sheet_community_posts", JSON.stringify(communityPosts));
-  }, [communityPosts]);
+    const fetchCommunityPosts = async () => {
+      try {
+        const response = await fetch("/.netlify/functions/community-posts", { method: "GET" });
+        if (!response.ok) throw new Error("community posts failed");
+        const data = await response.json();
+        setCommunityPosts(Array.isArray(data.posts) ? data.posts : []);
+        setCommunityStatus("저장된 의견을 불러왔습니다.");
+      } catch (error) {
+        console.error(error);
+        setCommunityStatus("게시판 저장소 연결을 확인해주세요. 현재 화면에서는 임시 목록만 보일 수 있습니다.");
+      }
+    };
+
+    fetchCommunityPosts();
+  }, []);
 
   useEffect(() => {
     const fetchVisitStats = async () => {
@@ -163,7 +175,7 @@ export default function App() {
         if (shouldCount) localStorage.setItem(localKey, "1");
       } catch (error) {
         console.error(error);
-        setVisitStats({ today: "연동 필요", total: "연동 필요" });
+        setVisitStats({ today: "확인 필요", total: "확인 필요" });
       }
     };
 
@@ -197,15 +209,34 @@ export default function App() {
     setSoilForm({ number: "", place: "", moisture: "", ec: "", temperature: "" });
   };
 
-  const handleCommunityAdd = () => {
+  const handleCommunityAdd = async () => {
     if (!communityForm.name || !communityForm.content) {
       alert("작성자와 내용을 입력해주세요.");
       return;
     }
-    const now = new Date();
-    const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    setCommunityPosts((prev) => [{ ...communityForm, timestamp }, ...prev]);
-    setCommunityForm({ name: "", place: "", content: "" });
+
+    setCommunityStatus("의견을 저장하는 중입니다.");
+
+    try {
+      const response = await fetch("/.netlify/functions/community-posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(communityForm),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "의견 저장에 실패했습니다.");
+      }
+
+      setCommunityPosts(Array.isArray(data.posts) ? data.posts : []);
+      setCommunityForm({ name: "", place: "", content: "" });
+      setCommunityStatus("의견이 저장되었습니다. 다른 접속자도 이 목록을 볼 수 있습니다.");
+    } catch (error) {
+      console.error(error);
+      setCommunityStatus("저장소 연결 실패: Netlify Functions/Blobs 설정 또는 배포 로그를 확인해주세요.");
+      alert(error?.message || "의견 저장에 실패했습니다.");
+    }
   };
 
   return (
@@ -224,7 +255,7 @@ export default function App() {
             </div>
           </div>
           <p style={{ margin: 0, color: "#4b5563", lineHeight: 1.6 }}>
-            공지사항, 수목활력, 토양측정, 현장소통 탭으로 구성되어 있습니다. 수목활력과 토양측정 데이터는 브라우저에 자동 임시저장되며 CSV 또는 엑셀로 내려받을 수 있습니다.
+            공지사항, 수목활력, 토양측정, 현장소통 탭으로 구성되어 있습니다. 수목활력과 토양측정 데이터는 브라우저에 자동 임시저장되며 CSV 또는 엑셀로 내려받을 수 있습니다. 현장소통 의견은 서버 저장소에 저장됩니다.
           </p>
         </div>
 
@@ -348,6 +379,7 @@ export default function App() {
           <>
             <div style={sectionStyle}>
               <h2 style={{ marginTop: 0 }}>현장소통</h2>
+              <div style={{ color: "#4b5563", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "10px", padding: "10px 12px", marginBottom: "12px" }}>{communityStatus}</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px", marginBottom: "12px" }}>
                 <div><label>작성자</label><input style={inputStyle} value={communityForm.name} onChange={(e) => setCommunityForm({ ...communityForm, name: e.target.value })} placeholder="이름 또는 별칭" /></div>
                 <div><label>장소</label><input style={inputStyle} value={communityForm.place} onChange={(e) => setCommunityForm({ ...communityForm, place: e.target.value })} placeholder="현장 위치 또는 대상지" /></div>
